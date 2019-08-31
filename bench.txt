@@ -1,0 +1,16 @@
+goos: darwin
+goarch: amd64
+BenchmarkSimpleCall-4     	 3000000	       378 ns/op
+BenchmarkLocalCall-4      	 1000000	      1169 ns/op
+BenchmarkRemoteCall-4     	   10000	    101513 ns/op
+BenchmarkCallAll-4        	   10000	    112244 ns/op
+BenchmarkCallAllAsync-4   	 1000000	      9435 ns/op
+BenchmarkCallSlowFunc-4   	   30000	     68610 ns/op
+PASS
+ok  	_/Users/tailed/Dropbox/programming/golang/cluster	24.855s
+
+
+$ go test -bench 'kRemoteCall|kRPC' -benchmem -benchtime 10s
+BenchmarkRemoteCall-4   	  200000	     97186 ns/op	     934 B/op	      30 allocs/op
+BenchmarkRPC-4          	  200000	     96196 ns/op	     494 B/op	      16 allocs/op
+
