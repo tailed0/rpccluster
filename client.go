@@ -152,23 +152,11 @@ func (cl *client) receiver(conn *connection, errChan chan error) {
 	}
 }
 
-func (cl *client) call(async bool, funcName string, params ...interface{}) (res []interface{}) {
+func (cl *client) call(funcName string, params ...interface{}) (res []interface{}) {
 	if cl.isMyself {
 		// do not use network for performance
-		// TODO: async
 		return Call(funcName, params...)
 	}
-	// otherwise, we need to send a request through network
-	if async {
-		req := functionCallRequest{
-			Name:  funcName,
-			Arg:   params,
-			Async: async,
-		}
-		cl.callReq <- req
-		return
-	}
-	// not async
 	ch := make(chan []interface{}, 1)
 	cl.mutex.Lock()
 	seq := cl.seq
@@ -177,10 +165,9 @@ func (cl *client) call(async bool, funcName string, params ...interface{}) (res 
 	cl.mutex.Unlock()
 
 	req := functionCallRequest{
-		Name:  funcName,
-		Arg:   params,
-		Async: async,
-		ID:    seq,
+		Name: funcName,
+		Arg:  params,
+		ID:   seq,
 	}
 	cl.callReq <- req
 	res = <-ch

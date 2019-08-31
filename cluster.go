@@ -67,9 +67,7 @@ func init() {
 type functionCallRequest struct {
 	Name string
 	Arg  []interface{}
-	// if Async is true, do not return the result of a function call
-	Async bool
-	ID    int
+	ID   int
 }
 type functionCallResponse struct {
 	Results []interface{}
@@ -215,9 +213,7 @@ func (c *Cluster) handleConnection(conn *connection) {
 				select {
 				case req := <-requestChannel:
 					res := Call(req.Name, req.Arg...)
-					if !req.Async {
-						conn.send(functionCallResponse{Results: res, ID: req.ID}) // ignore error
-					}
+					conn.send(functionCallResponse{Results: res, ID: req.ID}) // ignore error
 				case <-ctx.Done():
 					return
 				}
@@ -277,58 +273,38 @@ func (c *Cluster) Call(host string, funcName string, params ...interface{}) []in
 	}
 	return c.CallByID(id, funcName, params...)
 }
-func (c *Cluster) CallAsync(host string, funcName string, params ...interface{}) []interface{} {
-	id, ok := c.hostToID[host]
-	if !ok {
-		log.Panicf("Unknown host: %s", host)
-	}
-	return c.CallByIDAsync(id, funcName, params...)
-}
 
 // CallByID calls a function at the host identified by id.
 // Its return value is a slice of interfaces of the returned values.
 func (c *Cluster) CallByID(id int, funcName string, params ...interface{}) []interface{} {
-	return c.connections[id].call(false, funcName, params...)
-}
-func (c *Cluster) CallByIDAsync(id int, funcName string, params ...interface{}) []interface{} {
-	return c.connections[id].call(true, funcName, params...)
+	return c.connections[id].call(funcName, params...)
 }
 
 // CallAll calls the function "funcName" in all the connected servers.
 func (c *Cluster) CallAll(funcName string, params ...interface{}) [][]interface{} {
-	return c.callAll(false, funcName, params...)
+	return c.callAll(funcName, params...)
 }
 
-func (c *Cluster) CallAllAsync(funcName string, params ...interface{}) [][]interface{} {
-	return c.callAll(true, funcName, params...)
-}
-
-func (c *Cluster) callAll(async bool, funcName string, params ...interface{}) [][]interface{} {
+func (c *Cluster) callAll(funcName string, params ...interface{}) [][]interface{} {
 	ids := make([]int, len(c.connections))
 	for id := range ids {
 		ids[id] = id
 	}
-	return c.CallByIDs(ids, async, funcName, params...)
+	return c.CallByIDs(ids, funcName, params...)
 }
 
-// CallByIDs supports a fully general function call and specifies servers that are called, async or not, function name
-func (c *Cluster) CallByIDs(ids []int, async bool, funcName string, params ...interface{}) [][]interface{} {
+// CallByIDs supports a fully general function call and specifies servers that are called, function name
+func (c *Cluster) CallByIDs(ids []int, funcName string, params ...interface{}) [][]interface{} {
 	var wg sync.WaitGroup
 	var results = make([][]interface{}, len(c.connections))
 	for _, id := range ids {
-		if !async {
-			wg.Add(1)
-		}
+		wg.Add(1)
 		go func(id int) {
-			results[id] = c.connections[id].call(async, funcName, params...)
-			if !async {
-				wg.Done()
-			}
+			results[id] = c.connections[id].call(funcName, params...)
+			wg.Done()
 		}(id)
 	}
-	if !async {
-		wg.Wait()
-	}
+	wg.Wait()
 	return results
 }
 

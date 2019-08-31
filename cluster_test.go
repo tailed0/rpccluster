@@ -140,18 +140,6 @@ func BenchmarkCallAll(b *testing.B) {
 	}
 }
 
-func BenchmarkCallAllAsync(b *testing.B) {
-	port1 := 20000 + rand.Intn(10000)
-	port2 := 20000 + rand.Intn(10000)
-	cs := startLocalServers([]int{port1, port2})
-	Register("MyFunc", MyFunc)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		x := rand.Intn(100)
-		cs[0].CallAllAsync("MyFunc", x, "hello")
-	}
-}
-
 func TestCheckSendBlock(t *testing.T) {
 	// note that tcp send func may block...
 	port1 := 20000 + rand.Intn(10000)
