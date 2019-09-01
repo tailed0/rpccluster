@@ -2,7 +2,6 @@ package rpccluster
 
 import (
 	"encoding/gob"
-	"io"
 	"log"
 	"net"
 	"strings"
@@ -46,7 +45,7 @@ type client struct {
 	// seq keeps track of ID of remote procedure call.
 	seq int
 	// pending is a map from ID to channel to receive a result.
-	pending map[int](chan []interface{})
+	pending map[int](chan functionCallResponse)
 
 	callReq chan functionCallRequest
 }
@@ -57,7 +56,7 @@ func newClient(host string, uniqueID string) *client {
 		uniqueID: uniqueID,
 		isMyself: false,
 		seq:      0,
-		pending:  make(map[int](chan []interface{})),
+		pending:  make(map[int](chan functionCallResponse)),
 		callReq:  make(chan functionCallRequest),
 	}
 	go cl.serve()
@@ -111,10 +110,26 @@ func (cl *client) serve() {
 		conn := cl.mustConnect()
 
 		errChan := make(chan error, 2)
+
 		go cl.sender(conn, errChan)
 		go cl.receiver(conn, errChan)
 
-		_ = <-errChan
+		err := <-errChan // waiit until some error occurs
+
+		// broadcast the error to all the pending requests
+		cl.mutex.Lock()
+		for i, c := range cl.pending {
+			var response functionCallResponse
+			response.err = err
+			response.ID = i
+			select {
+			case c <- response:
+			default:
+			}
+		}
+		cl.mutex.Unlock()
+
+		// reconnect
 	}
 }
 
@@ -135,11 +150,7 @@ func (cl *client) receiver(conn *connection, errChan chan error) {
 		var res functionCallResponse
 		err := conn.recv(&res)
 		if err != nil {
-			if err == io.EOF {
-				log.Printf("Connection closed by %s\n", cl.host)
-			} else {
-				log.Printf("Error '%v' while receiving from host %s\n", err, cl.host)
-			}
+			log.Printf("Error '%v' while receiving from host %s\n", err, cl.host)
 			errChan <- err
 			return
 		}
@@ -147,7 +158,7 @@ func (cl *client) receiver(conn *connection, errChan chan error) {
 		cl.mutex.Lock()
 		ch := cl.pending[i]
 		cl.mutex.Unlock()
-		ch <- res.Results
+		ch <- res
 		close(ch)
 	}
 }
@@ -157,7 +168,7 @@ func (cl *client) call(funcName string, params ...interface{}) (res []interface{
 		// do not use network for performance
 		return Call(funcName, params...)
 	}
-	ch := make(chan []interface{}, 1)
+	ch := make(chan functionCallResponse, 1)
 	cl.mutex.Lock()
 	seq := cl.seq
 	cl.seq += 1
@@ -170,7 +181,11 @@ func (cl *client) call(funcName string, params ...interface{}) (res []interface{
 		ID:   seq,
 	}
 	cl.callReq <- req
-	res = <-ch
+	response := <-ch
+	if response.err != nil {
+		panic(response.err)
+	}
+	res = response.Results
 
 	cl.mutex.Lock()
 	delete(cl.pending, seq)

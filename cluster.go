@@ -72,6 +72,7 @@ type functionCallRequest struct {
 type functionCallResponse struct {
 	Results []interface{}
 	ID      int
+	err     error
 }
 
 // Cluster is a server and clients.
@@ -132,7 +133,6 @@ func New() *Cluster {
 // NewCluster is a convenient constructor of Cluster.
 // It blocks until the connection to all the servers succeeds.
 // hosts must be specified by the "host:port" form.
-// This function will block until it connects to all the server specified by hosts.
 func NewCluster(listenPort int, hosts ...string) *Cluster {
 	c := New()
 	err := c.Listen(listenPort)
@@ -193,7 +193,8 @@ func (c *Cluster) serve() {
 	for {
 		conn, err := c.listener.Accept()
 		if err != nil {
-			panic(err)
+			// Too many open files?
+			log.Fatalf("Can't accept a connection request: %v\n", err)
 		}
 		go c.handleConnection(newConnection(conn))
 	}
@@ -228,7 +229,7 @@ func (c *Cluster) handleConnection(conn *connection) {
 				select {
 				case req := <-requestChannel:
 					res := Call(req.Name, req.Arg...)
-					responseChannel <- functionCallResponse{Results: res, ID: req.ID}
+					responseChannel <- functionCallResponse{Results: res, ID: req.ID, err: nil}
 				case <-ctx.Done():
 					return
 				}
