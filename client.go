@@ -110,11 +110,13 @@ func (cl *client) serve() {
 		conn := cl.mustConnect()
 
 		errChan := make(chan error, 2)
+		stopChan := make(chan struct{})
 
-		go cl.sender(conn, errChan)
+		go cl.sender(conn, errChan, stopChan)
 		go cl.receiver(conn, errChan)
 
 		err := <-errChan // waiit until some error occurs
+		close(stopChan)
 
 		// broadcast the error to all the pending requests
 		cl.mutex.Lock()
@@ -122,25 +124,26 @@ func (cl *client) serve() {
 			var response functionCallResponse
 			response.err = err
 			response.ID = i
-			select {
-			case c <- response:
-			default:
-			}
+			c <- response
 		}
 		cl.mutex.Unlock()
 
-		// reconnect
+		// clean up in order to reconnect
 	}
 }
 
-func (cl *client) sender(conn *connection, errChan chan error) {
+func (cl *client) sender(conn *connection, errChan chan error, stopChan chan struct{}) {
 	for {
-		req := <-cl.callReq
-		err := conn.send(req)
-		if err != nil {
-			log.Printf("Error '%v' while sending to host %s\n", err, cl.host)
-			errChan <- err
+		select {
+		case <-stopChan:
 			return
+		case req := <-cl.callReq:
+			err := conn.send(req)
+			if err != nil {
+				log.Printf("Error '%v' while sending to host %s\n", err, cl.host)
+				errChan <- err
+				return
+			}
 		}
 	}
 }
@@ -159,7 +162,6 @@ func (cl *client) receiver(conn *connection, errChan chan error) {
 		ch := cl.pending[i]
 		cl.mutex.Unlock()
 		ch <- res
-		close(ch)
 	}
 }
 
@@ -169,7 +171,7 @@ func (cl *client) call(funcName string, params ...interface{}) ([]interface{}, e
 		// do not use network for performance
 		return Call(funcName, params...), nil
 	}
-	ch := make(chan functionCallResponse, 1)
+	ch := make(chan functionCallResponse, 2) // a channel might receive a result or an error
 	cl.mutex.Lock()
 	seq := cl.seq
 	cl.seq += 1
