@@ -163,10 +163,11 @@ func (cl *client) receiver(conn *connection, errChan chan error) {
 	}
 }
 
-func (cl *client) call(funcName string, params ...interface{}) (res []interface{}) {
+func (cl *client) call(funcName string, params ...interface{}) ([]interface{}, error) {
+	var res []interface{}
 	if cl.isMyself {
 		// do not use network for performance
-		return Call(funcName, params...)
+		return Call(funcName, params...), nil
 	}
 	ch := make(chan functionCallResponse, 1)
 	cl.mutex.Lock()
@@ -183,12 +184,23 @@ func (cl *client) call(funcName string, params ...interface{}) (res []interface{
 	cl.callReq <- req
 	response := <-ch
 	if response.err != nil {
-		panic(response.err)
+		return res, response.err
 	}
 	res = response.Results
 
 	cl.mutex.Lock()
 	delete(cl.pending, seq)
 	cl.mutex.Unlock()
-	return res
+	return res, nil
+}
+
+// mustCall retries if an error occurs
+func (cl *client) mustCall(funcName string, params ...interface{}) []interface{} {
+	for {
+		res, err := cl.call(funcName, params...)
+		if err == nil {
+			return res
+		}
+		log.Printf("Error '%v' in mustCall.  Retrying...\n", err)
+	}
 }

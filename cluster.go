@@ -281,19 +281,30 @@ func Call(name string, params ...interface{}) []interface{} {
 	return res
 }
 
-// Call a function "funcName" at "host".
-func (c *Cluster) Call(host string, funcName string, params ...interface{}) []interface{} {
+// HostToID returns the ID of a server associated with host
+func (c *Cluster) HostToID(host string) int {
 	id, ok := c.hostToID[host]
 	if !ok {
 		log.Panicf("Unknown host: %s", host)
 	}
-	return c.CallByID(id, funcName, params...)
+	return id
 }
 
-// CallByID calls a function at the host identified by id.
+// TryCallByID calls a function at the host identified by id.
 // Its return value is a slice of interfaces of the returned values.
-func (c *Cluster) CallByID(id int, funcName string, params ...interface{}) []interface{} {
+// If an error occurs, it returns the error.
+func (c *Cluster) TryCallByID(id int, funcName string, params ...interface{}) ([]interface{}, error) {
 	return c.connections[id].call(funcName, params...)
+}
+
+// Call a function "funcName" at "host", and it retries if an error occurs.
+func (c *Cluster) Call(host string, funcName string, params ...interface{}) []interface{} {
+	return c.CallByID(c.HostToID(host), funcName, params...)
+}
+
+// CallByID is similar to CallByID, but it retries if an error occurs
+func (c *Cluster) CallByID(id int, funcName string, params ...interface{}) []interface{} {
+	return c.connections[id].mustCall(funcName, params...)
 }
 
 // CallAll calls the function "funcName" in all the connected servers.
@@ -316,7 +327,7 @@ func (c *Cluster) CallByIDs(ids []int, funcName string, params ...interface{}) [
 	for _, id := range ids {
 		wg.Add(1)
 		go func(id int) {
-			results[id] = c.connections[id].call(funcName, params...)
+			results[id] = c.connections[id].mustCall(funcName, params...)
 			wg.Done()
 		}(id)
 	}
