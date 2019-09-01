@@ -206,14 +206,29 @@ func (c *Cluster) handleConnection(conn *connection) {
 	cpus := runtime.NumCPU()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	requestChannel := make(chan functionCallRequest, cpus)
+	requestChannel := make(chan functionCallRequest, 1000)
+	responseChannel := make(chan functionCallResponse, 1000)
+	go func() {
+		// send responses to client
+		for {
+			select {
+			case req := <-responseChannel:
+				if err := conn.send(req); err != nil {
+					log.Printf("Warning: '%v' while answering a request\n", err)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	for i := 0; i < cpus; i++ {
 		go func() {
+			// Call a function
 			for {
 				select {
 				case req := <-requestChannel:
 					res := Call(req.Name, req.Arg...)
-					conn.send(functionCallResponse{Results: res, ID: req.ID}) // ignore error
+					responseChannel <- functionCallResponse{Results: res, ID: req.ID}
 				case <-ctx.Done():
 					return
 				}
